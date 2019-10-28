@@ -1,18 +1,15 @@
 # Created by Hugo Brandao (hbrandao@g.harvard.edu) October 2016
-import numpy as np;
-from mirnylib.genome import Genome
+import numpy as np
 from mirnylib import plotting
 from mirnylib.numutils import ultracorrect
-from brandaolib import plotting
-from hiclib.binnedData import binnedData
+from Bio import SeqIO
 import pandas as pd
 import os
-from Bio import SeqIO
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, NoNorm
 from scipy.ndimage.filters import gaussian_filter
-
 import joblib
+
 #cachedir = '.'
 #if not os.path.exists(cachedir):
 #    os.mkdir(cachedir)
@@ -42,17 +39,17 @@ def _getOperonList(operon_file):
         oexp = pd.Series([0]*len(operonsBCyc))
         for f in range(len(operonsBCyc)):
             gen_coords = [];
-            gen_coords += ([int(n) for n in (operonsBCyc["Left-End-Position"].ix[f]).split('//')])
-            gen_coords += ([int(n) for n in (operonsBCyc["Right-End-Position"].ix[f]).split('//')])
+            gen_coords += ([int(n) for n in (operonsBCyc["Left-End-Position"].iloc[f]).split('//')])
+            gen_coords += ([int(n) for n in (operonsBCyc["Right-End-Position"].iloc[f]).split('//')])
             st = min(gen_coords);
             ed = max(gen_coords); 
             ostart[f] = st
             oend[f] = ed
             olen[f] = np.abs(ed-st)
 
-            if operonsBCyc["Transcription-Direction"].ix[f] == '+':
+            if operonsBCyc["Transcription-Direction"].iloc[f] == '+':
                 ostrand[f] = 1;
-            elif operonsBCyc["Transcription-Direction"].ix[f] == '-':
+            elif operonsBCyc["Transcription-Direction"].iloc[f] == '-':
                 ostrand[f] = -1;    
 
         operonsList["starts"] = ostart;
@@ -62,11 +59,6 @@ def _getOperonList(operon_file):
         return operonsList
 _getOperonList = mem.cache(_getOperonList)
 
-#@mem.cache
-#def _load_genome(fileloc):
-#    return Genome(genomePath=fileloc, readChrms=[], chrmFileTemplate='%s.fa') 
-#_load_genome = mem.cache(_load_genome)
-
 ######################################################################
 
 class HiC_genomeObject: 
@@ -75,8 +67,8 @@ class HiC_genomeObject:
         self.HiC_genomDict = {}
         self.__mapcount = 0; 
     
-    def load_genome(self,fileloc): 
-        self.HiC_genomDict['gen'] = Genome(genomePath=fileloc, readChrms=[], chrmFileTemplate='%s.fa')
+    def set_chromosome_length(self,chrmLen): 
+        self.HiC_genomDict['chrmLen'] = chrmLen
 
     def load_text_HiC_Map(self,fname,source='',key='map',iterativeCorrect=False):
         if os.path.isabs(fname):
@@ -128,14 +120,14 @@ class HiC_genomeObject:
     def show_heatmap(self,key,vmax=None,vmin=None,showShifted=False,shiftBy=None,logColorScale=None,iterativeCorrect=False,\
                      cmap='fall',fillZeros=True,observedOverExpected=False): 
         # logColorScale is set a floating point value only if we wish to display a log colorbar 
-        L = self.HiC_genomDict['gen'].chrmLens[0]//1e3; 
+        L = self.HiC_genomDict['chrmLen']//1e3; 
         hmap = self.HiC_genomDict[key].heatmap.copy()
         
         if fillZeros == True:
             hmap[hmap==0] = np.max(hmap)
         
         if observedOverExpected == True: 
-            hmap = setMatrixScaling(hmap,alpha=0)
+            hmap = setMatrilocScaling(hmap,alpha=0)
         
         if iterativeCorrect == True:
             hmap = ultracorrect(hmap) 
@@ -196,22 +188,22 @@ class HiC_genomeObject:
     def load_operonStructure(self,operon_file):
         self.HiC_genomDict["operons"] = _getOperonList(operon_file);
             
-    def ang2site(self,ang,chrm=0):
+    def ang2site(self,ang):
         site = 0; 
         if ang>=0:
-            site = ang/360*self.HiC_genomDict['gen'].chrmLens[chrm]
+            site = ang/360*self.HiC_genomDict['chrmLen'] 
         else:
-            site = (360+ang)/360*self.HiC_genomDict['gen'].chrmLens[chrm]
+            site = (360+ang)/360*self.HiC_genomDict['chrmLen'] 
         return int(site)
 
     def computeDScore(self,mutuallyExclusiveFeatures=True):     
-        if 'gen' not in self.HiC_genomDict.keys():
+        if 'chrmLen' not in self.HiC_genomDict.keys():
             print('DScore not computed: First upload genome to HiC_genomeObject');
             return;  
 
         # GET rRNA level transcription
         if 'rRNA' in self.HiC_genomDict.keys():
-            dscoreR = np.zeros(self.HiC_genomDict['gen'].chrmLens[0]);
+            dscoreR = np.zeros(self.HiC_genomDict['chrmLen'] );
             for op in range(len(self.HiC_genomDict['rRNA'])):
                 st = int(self.HiC_genomDict['rRNA']["starts"].iloc[op])
                 ed = int(self.HiC_genomDict['rRNA']["ends"].iloc[op])
@@ -221,7 +213,7 @@ class HiC_genomeObject:
                                
         # GET tRNA level transcription
         if 'tRNA' in self.HiC_genomDict.keys(): 
-            dscoreT = np.zeros(self.HiC_genomDict['gen'].chrmLens[0]);
+            dscoreT = np.zeros(self.HiC_genomDict['chrmLen'] );
             for op in range(len(self.HiC_genomDict['tRNA'])):
                 st = int(self.HiC_genomDict['tRNA']["starts"].iloc[op])
                 ed = int(self.HiC_genomDict['tRNA']["ends"].iloc[op])
@@ -236,7 +228,7 @@ class HiC_genomeObject:
             
         # GET operon-level transcription
         if 'operons' in self.HiC_genomDict.keys():
-            dscoreO = np.zeros(self.HiC_genomDict['gen'].chrmLens[0]);
+            dscoreO = np.zeros(self.HiC_genomDict['chrmLen'] );
             for op in range(len(self.HiC_genomDict['operons'])):
                 st = int(self.HiC_genomDict['operons']["starts"].iloc[op])
                 ed = int(self.HiC_genomDict['operons']["ends"].iloc[op])
@@ -251,7 +243,7 @@ class HiC_genomeObject:
             self.HiC_genomDict['dscoreO'] = dscoreO;            
    
     def doExtrusionTrace(self,key,gamma=1,rho=1,tau=1,substeps=1e4,v_avg_bps=833,timeCutoff=50*60, \
-                        showShifted=False,doPeriodic=False,showPlot=True, chip_key='',chip_cap=5,colour='lightblue',lw=4): 
+                        showShifted=False,doPeriodic=False,showPlot=True, chip_key='',chip_cap=100000,colour='lightblue',lw=4): 
 
         x_clockwise = []
         x_cclockwise = []
@@ -273,7 +265,7 @@ class HiC_genomeObject:
 
         # get parS site and chromosome arm lengths
         parS_list = self.HiC_genomDict[key].parS
-        L = self.HiC_genomDict['gen'].chrmLens[0]
+        L = self.HiC_genomDict['chrmLen'] 
         L_kb  = L//1e3
         ter_site = L//2 #  approximate
         L_arm1 = (L-ter_site)
@@ -355,8 +347,8 @@ class HiC_genomeObject:
                 plt.draw()
         return x_clockwise, x_cclockwise, tq, X_coords, Y_coords, vmax    
     
-    def doExtrusionTraceByStep(self,key,fmix=0,gamma=1,rho=1,tau=1,substeps=1e4,v_avg_bps=833,timeCutoff=50*60, \
-                        showShifted=False,doPeriodic=False,showPlot=True, chip_key='',chip_cap=5,colour='lightblue',lw=4): 
+    def doExtrusionTraceByStep(self,key,fmiloc=0,gamma=1,rho=1,tau=1,substeps=1e4,v_avg_bps=833,timeCutoff=50*60, \
+                        showShifted=False,doPeriodic=False,showPlot=True, chip_key='',chip_cap=100000,colour='lightblue',lw=4): 
 
         x_clockwise = []
         x_cclockwise = []
@@ -378,7 +370,7 @@ class HiC_genomeObject:
 
         # get parS site and chromosome arm lengths
         parS_list = self.HiC_genomDict[key].parS
-        L = self.HiC_genomDict['gen'].chrmLens[0]
+        L = self.HiC_genomDict['chrmLen'] 
         L_kb  = L//1e3
         ter_site = L//2 #  approximate
         L_arm1 = (L-ter_site)
@@ -443,11 +435,11 @@ class HiC_genomeObject:
                 # step xc
                 if tc <= tcc: 
                     xc = xc + 1
-                    tc += fmix/2*tcounterclockwise[int(xcc)] + (1-fmix/2)*tclockwise[int(xc)]
+                    tc += fmiloc/2*tcounterclockwise[int(xcc)] + (1-fmiloc/2)*tclockwise[int(xc)]
 
                 if tcc < tc:
                     xcc = xcc+ 1
-                    tcc += fmix/2*tclockwise[int(xc)] + (1-fmix/2)*tcounterclockwise[int(xcc)]
+                    tcc += fmiloc/2*tclockwise[int(xc)] + (1-fmiloc/2)*tcounterclockwise[int(xcc)]
 
                 #print((np.min([tc,tcc]),xc,xcc))
                 xyt_pairs.append([np.min([tc,tcc]),xc,xcc])
@@ -483,9 +475,9 @@ class HiC_genomeObject:
         return x_clockwise, x_cclockwise, tq, X_coords, Y_coords, vmax    
 
 
-    def show_chip(self,chip_key,chip_cap=1.4,gauss_filt_length=1000,vmax=None,vmin=None,showShifted=False,shiftBy=None): 
+    def show_chip(self,chip_key,chip_cap=100000,gauss_filt_length=1000,vmax=None,vmin=None,showShifted=False,shiftBy=None): 
 
-        L = self.HiC_genomDict['gen'].chrmLens[0]//1e3; 
+        L = self.HiC_genomDict['chrmLen'] //1e3; 
 
         chip_norm = self.HiC_genomDict[chip_key].chip_norm.copy()
         chip_norm[np.isnan(chip_norm)] = 1
@@ -512,7 +504,7 @@ class HiC_genomeObject:
             plt.xlim([0,len(chip_norm)]) 
 
         plt.xlabel('Genome position')
-        plt.ylabel('Capped ChIP signal (arb.)')
+        plt.ylabel('chrmLenChIP signal (arb.)')
     
 # this is a container that holds heatmaps and associated metadata
 class HiC_object: 
@@ -530,11 +522,11 @@ class ChIP_object:
 
 # these are helper functions that return standard utility outputs
 from mirnylib.numutils import logbinsnew, fillDiagonal
-def getLogBinnedScaling(inMatrix,measureType='sum',isCircular=True):
-    inMatrix = np.array(inMatrix, dtype = np.double)
-    N = len(inMatrix)    
+def getLogBinnedScaling(inMatriloc,measureType='sum',isCircular=True):
+    inMatriloc = np.array(inMatriloc, dtype = np.double)
+    N = len(inMatriloc)    
         
-    marginals = np.sum(inMatrix, axis=0)
+    marginals = np.sum(inMatriloc, axis=0)
     mask = marginals > 0 
     mask2d = mask[:,None] * mask[None,:]
     
@@ -547,16 +539,16 @@ def getLogBinnedScaling(inMatrix,measureType='sum',isCircular=True):
         maskmean = 0
         for i in range(st, end):
             if measureType == 'median':
-                curmean += np.median(np.diagonal(inMatrix, i))
+                curmean += np.median(np.diagonal(inMatriloc, i))
                 maskmean += np.median(np.diagonal(mask2d, i))
                 if (isCircular==True) and (i>0): # to not double-count the main diagonal if considered
-                    curmean += np.median(np.diagonal(inMatrix, N-i))
+                    curmean += np.median(np.diagonal(inMatriloc, N-i))
                     maskmean += np.median(np.diagonal(mask2d, N-i))
             else:
-                curmean += np.nanmean(np.diagonal(inMatrix, i))
+                curmean += np.nanmean(np.diagonal(inMatriloc, i))
                 maskmean += np.nanmean(np.diagonal(mask2d, i))
                 if (isCircular==True) and (i>0): 
-                    curmean += np.median(np.diagonal(inMatrix, N-i-1))
+                    curmean += np.median(np.diagonal(inMatriloc, N-i-1))
                     maskmean += np.median(np.diagonal(mask2d, N-i-1))
         Pc.append(curmean / maskmean)    
     mids = np.r_[mids, N]
@@ -576,12 +568,12 @@ def getLogBinnedScaling(inMatrix,measureType='sum',isCircular=True):
         Pc_new = Pc
     return Pc_new, mids
 
-def setMatrixScaling(inMatrix, alpha=0):
-    inMatrix = inMatrix.copy()
-    N = len(inMatrix)
-    Pc, mids = getLogBinnedScaling(inMatrix,isCircular=True)
+def setMatrilocScaling(inMatriloc, alpha=0):
+    inMatriloc = inMatriloc.copy()
+    N = len(inMatriloc)
+    Pc, mids = getLogBinnedScaling(inMatriloc,isCircular=True)
     for i in range(N):
-        fillDiagonal(inMatrix,np.diagonal(inMatrix,i)/Pc[i]/(i**(-alpha)),i)
+        fillDiagonal(inMatriloc,np.diagonal(inMatriloc,i)/Pc[i]/(i**(-alpha)),i)
 
-    return np.triu(inMatrix)+np.triu(inMatrix).T
+    return np.triu(inMatriloc)+np.triu(inMatriloc).T
 
