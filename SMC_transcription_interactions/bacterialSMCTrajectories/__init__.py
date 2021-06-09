@@ -1,0 +1,1 @@
+from bacterialSMCTrajectories import HiC_genomeObject
